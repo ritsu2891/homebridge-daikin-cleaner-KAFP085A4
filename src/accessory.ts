@@ -1,4 +1,4 @@
-import { API, DynamicPlatformPlugin, Logger, PlatformAccessory, AccessoryConfig, Service, Characteristic } from 'homebridge';
+import { API, Logger, AccessoryConfig, Service } from 'homebridge';
 import { setIp, getCleanerState, setCleanerState, getSensorValue } from './daikinCleaner';
 import { POW, MODE } from './DaikinCleanerStatus';
 
@@ -8,39 +8,39 @@ export class DaikinCleanerAccessory {
   cleanerService: Service;
   temperatureSensorService: Service;
   humiditySensorService: Service;
-  targetState: number = 0;
-  currentState: number = 0;
+  targetState = 0;
+  currentState = 0;
 
   constructor(
     public readonly log: Logger,
     public readonly config: AccessoryConfig,
-    public readonly api: API
+    public readonly api: API,
   ) {
     this.log.debug('Example Accessory Plugin Loaded');
 
     setIp(config.host as string);
 
     this.informationService = new this.api.hap.Service.AccessoryInformation()
-      .setCharacteristic(this.api.hap.Characteristic.Manufacturer, "DAIKIN")
-      .setCharacteristic(this.api.hap.Characteristic.Model, "KAFP085A4");
+      .setCharacteristic(this.api.hap.Characteristic.Manufacturer, 'DAIKIN')
+      .setCharacteristic(this.api.hap.Characteristic.Model, 'KAFP085A4');
 
     this.cleanerService = new this.api.hap.Service.AirPurifier();
     this.cleanerService.getCharacteristic(this.api.hap.Characteristic.Active)
-        .on('get', this.handleActiveGet.bind(this))
-        .on('set', this.handleActiveSet.bind(this));
+      .on('get', this.handleActiveGet.bind(this))
+      .on('set', this.handleActiveSet.bind(this));
     this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentAirPurifierState)
-        .on('get', this.handleCurrentAirPurifierStateGet.bind(this));
+      .on('get', this.handleCurrentAirPurifierStateGet.bind(this));
     this.cleanerService.getCharacteristic(this.api.hap.Characteristic.TargetAirPurifierState)
-        .on('get', this.handleTargetAirPurifierStateGet.bind(this))
-        .on('set', this.handleTargetAirPurifierStateSet.bind(this));
+      .on('get', this.handleTargetAirPurifierStateGet.bind(this))
+      .on('set', this.handleTargetAirPurifierStateSet.bind(this));
 
     this.temperatureSensorService = new this.api.hap.Service.TemperatureSensor();
     this.temperatureSensorService.getCharacteristic(this.api.hap.Characteristic.CurrentTemperature)
-        .on('get', this.handleCurrentTemperatureGet.bind(this));
+      .on('get', this.handleCurrentTemperatureGet.bind(this));
 
     this.humiditySensorService = new this.api.hap.Service.HumiditySensor();
     this.humiditySensorService.getCharacteristic(this.api.hap.Characteristic.CurrentRelativeHumidity)
-        .on('get', this.handleCurrentRelativeHumidityGet.bind(this));
+      .on('get', this.handleCurrentRelativeHumidityGet.bind(this));
   }
 
   getServices() {
@@ -48,7 +48,7 @@ export class DaikinCleanerAccessory {
       this.informationService,
       this.cleanerService,
       this.temperatureSensorService,
-      this.humiditySensorService
+      this.humiditySensorService,
     ];
   }
 
@@ -56,16 +56,25 @@ export class DaikinCleanerAccessory {
   async handleActiveGet(callback) {
     this.log.debug('Triggered GET Active');
     const state = await getCleanerState();
-    this.currentState = state.pow == POW.OFF ? this.api.hap.Characteristic.CurrentAirPurifierState.INACTIVE : this.api.hap.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
+    if (state.pow === POW.OFF) {
+      this.currentState = this.api.hap.Characteristic.CurrentAirPurifierState.INACTIVE;
+    } else {
+      this.api.hap.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
+    }
     this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentAirPurifierState).updateValue(this.currentState);
-    callback(null, state.pow == POW.OFF ? this.api.hap.Characteristic.Active.INACTIVE : this.api.hap.Characteristic.Active.ACTIVE);
+    callback(null, state.pow === POW.OFF ? this.api.hap.Characteristic.Active.INACTIVE : this.api.hap.Characteristic.Active.ACTIVE);
   }
+
   async handleActiveSet(value, callback) {
     this.log.debug('Triggered SET Active:' + value);
     const state = await getCleanerState();
     state.pow = value;
     await setCleanerState(state);
-    this.currentState = state.pow == POW.OFF ? this.api.hap.Characteristic.CurrentAirPurifierState.INACTIVE : this.api.hap.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
+    if (state.pow === POW.OFF) {
+      this.currentState = this.api.hap.Characteristic.CurrentAirPurifierState.INACTIVE;
+    } else {
+      this.api.hap.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
+    }
     this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentAirPurifierState).updateValue(this.currentState);
     callback(null);
   }
@@ -86,14 +95,15 @@ export class DaikinCleanerAccessory {
     }
     callback(null, this.targetState);
   }
+
   async handleTargetAirPurifierStateSet(value, callback) {
     this.log.debug('Triggered SET TargetAirPurifierState:' + value);
     this.targetState = value;
     const state = await getCleanerState();
-    if (value == this.api.hap.Characteristic.TargetAirPurifierState.AUTO) {
+    if (value === this.api.hap.Characteristic.TargetAirPurifierState.AUTO) {
       state.mode = MODE.RCOMMENDED;
       await setCleanerState(state);
-    } else if (value == this.api.hap.Characteristic.TargetAirPurifierState.MANUAL) {
+    } else if (value === this.api.hap.Characteristic.TargetAirPurifierState.MANUAL) {
       state.mode = MODE.MANUAL;
       await setCleanerState(state);
     }

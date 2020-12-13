@@ -1,15 +1,15 @@
 import axios from 'axios';
-import { DaikinCleanerStatus, decodeStatusResponseStr } from './DaikinCleanerStatus'
+import { DaikinCleanerStatus, decodeStatusResponseStr } from './DaikinCleanerStatus';
 
-let ip = "localhost";
+let ip = 'localhost';
 let client = axios.create({
-  baseURL: `http://${ip}/`
+  baseURL: `http://${ip}/`,
 });
 
 function setIp(newIp: string) {
   ip = newIp;
   client = axios.create({
-    baseURL: `http://${ip}/`
+    baseURL: `http://${ip}/`,
   });
 }
 
@@ -24,7 +24,7 @@ async function getCleanerState() {
 
 async function setCleanerState(state: DaikinCleanerStatus) {
   await client.get('/cleaner/set_control_info', {
-    params: state.getAsDict()
+    params: state.getAsDict(),
   });
   return;
 }
@@ -33,4 +33,4 @@ async function getSensorValue() {
   return decodeStatusResponseStr(await getContent('/cleaner/get_sensor_info'));
 }
 
-export { setIp, getCleanerState, getSensorValue, setCleanerState }
+export { setIp, getCleanerState, getSensorValue, setCleanerState };

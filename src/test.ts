@@ -1,16 +1,16 @@
-import {getCleanerState, setCleanerState, getSensorValue} from './daikinCleaner'
-import { POW, MODE } from './DaikinCleanerStatus';
+import { getCleanerState, setCleanerState, getSensorValue } from './daikinCleaner';
+import { MODE } from './DaikinCleanerStatus';
 
 async function exec() {
   const state = await getCleanerState();
-  console.log(state);
+  // console.log(state);
 
   state.mode = MODE.MANUAL;
-  console.log(state);
+  // console.log(state);
   await setCleanerState(state);
 
-
-  // const sensorVal = await getSensorValue();
+  const sensorVal = await getSensorValue();
+  sensorVal.humd;
   // console.log(sensorVal);
 }
 
