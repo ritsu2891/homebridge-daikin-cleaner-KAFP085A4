@@ -45,12 +45,19 @@ export class DaikinCleanerAccessory {
   }
 
   getServices() {
-    return [
-      this.informationService,
-      this.cleanerService,
-      this.temperatureSensorService,
-      this.humiditySensorService,
-    ];
+    if (this.config.enableSensors) {
+      return [
+        this.informationService,
+        this.cleanerService,
+        this.temperatureSensorService,
+        this.humiditySensorService,
+      ];
+    } else {
+      return [
+        this.informationService,
+        this.cleanerService
+      ];
+    }
   }
 
   // 電源

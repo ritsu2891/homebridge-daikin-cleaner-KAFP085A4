@@ -16,6 +16,12 @@
         "type": "string",
         "required": true,
         "format": "hostname"
+      },
+      "enableSensors": {
+        "title": "Enable Sensors",
+        "type": "boolean",
+        "required": true,
+        "default": false
       }
     }
   }
