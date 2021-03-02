@@ -52,10 +52,14 @@ export class DaikinCleanerStatus {
     return this._airvol;
   }
 
+  public set airvol(newAirvol) {
+    this._airvol = newAirvol;
+  }
+
   public get humd() {
     return this._humd;
   }
- 
+
 }
 
 export function decodeStatusResponseStr(res: string) {
@@ -90,7 +94,7 @@ export const AIRVOL = {
   SILENT: 1, // しずか
   WEAK: 2, // 弱
   NORMAL: 3, // 標準
-  TURBO: 4, // ターボ
+  TURBO: 5, // ターボ
 };
 
 export const HUMD = {
