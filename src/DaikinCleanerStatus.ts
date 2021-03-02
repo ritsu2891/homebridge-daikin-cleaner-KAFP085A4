@@ -60,6 +60,10 @@ export class DaikinCleanerStatus {
     return this._humd;
   }
 
+  public set humd(newHumd) {
+    this._humd = newHumd;
+  }
+
 }
 
 export function decodeStatusResponseStr(res: string) {
