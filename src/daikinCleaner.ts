@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { API } from 'homebridge';
 import { DaikinCleanerStatus, decodeStatusResponseStr } from './DaikinCleanerStatus';
 
 let ip = 'localhost';
@@ -18,8 +19,8 @@ async function getContent(endpoint) {
   return res.data;
 }
 
-async function getCleanerState() {
-  return new DaikinCleanerStatus(await getContent('/cleaner/get_control_info'));
+async function getCleanerState(api: API) {
+  return new DaikinCleanerStatus(await getContent('/cleaner/get_control_info'), api);
 }
 
 async function setCleanerState(state: DaikinCleanerStatus) {

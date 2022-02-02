@@ -1,6 +1,6 @@
 import { API, Logger, AccessoryConfig, Service } from 'homebridge';
 import { setIp, getCleanerState, setCleanerState, getSensorValue } from './daikinCleaner';
-import { POW, MODE, AIRVOL, HUMD } from './DaikinCleanerStatus';
+import { POW, MODE, AIRVOL, HUMD, DaikinCleanerStatus } from './DaikinCleanerStatus';
 import { Mutex } from 'await-semaphore';
 
 export class DaikinCleanerAccessory {
@@ -10,11 +10,8 @@ export class DaikinCleanerAccessory {
   temperatureSensorService: Service;
   humiditySensorService: Service;
   mutex = new Mutex();
-  targetState = 0;
-  currentState = 0;
-  currentRotationSpeed = 100;
-  //---
-  currentHumdState = 0;
+
+  currentStatus: DaikinCleanerStatus;
   targetHumdState = 1;
 
   constructor(
@@ -65,6 +62,14 @@ export class DaikinCleanerAccessory {
     this.humiditySensorService = new this.api.hap.Service.HumiditySensor();
     this.humiditySensorService.getCharacteristic(this.api.hap.Characteristic.CurrentRelativeHumidity)
       .on('get', this.handleCurrentRelativeHumidityGet.bind(this));
+
+    this.currentStatus = new DaikinCleanerStatus("ret=OK,pow=0,mode=0,airvol=3,humd=2", api);
+
+    this.update();
+  }
+
+  async update() {
+    this.currentStatus = await getCleanerState(this.api);
   }
 
   getServices() {
@@ -92,42 +97,23 @@ export class DaikinCleanerAccessory {
   // 電源
   async handleActiveGet(callback) {
     this.log.debug('Triggered GET Active');
-    const state = await getCleanerState();
-    if (state.pow === POW.OFF) {
-      this.currentState = this.api.hap.Characteristic.CurrentAirPurifierState.INACTIVE;
-    } else {
-      this.currentState = this.api.hap.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
-    }
-    callback(null, state.pow === POW.OFF ? this.api.hap.Characteristic.Active.INACTIVE : this.api.hap.Characteristic.Active.ACTIVE);
-    this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentAirPurifierState).updateValue(this.currentState);
+    callback(null, this.currentStatus.charActive);
+    await this.update();
+    this.cleanerService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.currentStatus.charActive);
+    this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentAirPurifierState).updateValue(this.currentStatus.charCurrentAirPurifierState);
   }
 
   async handleActiveSet(value, callback) {
     this.log.debug('Triggered SET Active:' + value);
+    callback(null);
     const release = await this.mutex.acquire();
     try {
-      const state = await getCleanerState();
-      state.pow = value;
-      await setCleanerState(state);
-      callback(null);
-      if (state.pow === POW.OFF) {
-        this.currentState = this.api.hap.Characteristic.CurrentAirPurifierState.INACTIVE;
-        // 加湿機能の電源をオフ
-        this.humidifierService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.api.hap.Characteristic.Active.INACTIVE);
-        this.currentHumdState = this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE;
-        this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentHumdState);
-        // ===================
-      } else {
-        this.currentState = this.api.hap.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
-        // 加湿機能の電源をオン
-        if (state.humd !== HUMD.OFF) {
-          this.humidifierService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.api.hap.Characteristic.Active.ACTIVE);
-          this.currentHumdState = this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING;
-          this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentHumdState);
-        }
-        // ===================
-      }
-      this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentAirPurifierState).updateValue(this.currentState);
+      this.currentStatus.pow = value;
+      await setCleanerState(this.currentStatus);
+      await this.update();
+      this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentAirPurifierState).updateValue(this.currentStatus.charActive);
+      this.humidifierService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.currentStatus.charCurrentHumidifierActive);
+      this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentStatus.charCurrentHumidifierDehumidifierState);
     } finally {
       release();
     }
@@ -135,98 +121,58 @@ export class DaikinCleanerAccessory {
 
   async handleCurrentAirPurifierStateGet(callback) {
     this.log.debug('Triggered GET CurrentAirPurifierState');
-    const state = await getCleanerState();
-    if (state.pow === POW.OFF) {
-      this.currentState = this.api.hap.Characteristic.CurrentAirPurifierState.INACTIVE;
-    } else {
-      this.currentState = this.api.hap.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
-    }
-    callback(null, this.currentState);
+    callback(null, this.currentStatus.charCurrentAirPurifierState);
+    await this.update();
+    this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentAirPurifierState).updateValue(this.currentStatus.charCurrentAirPurifierState);
   }
 
   // 風量（空気清浄）
   async handleRotationSpeedSet(value, callback) {
     this.log.debug(`Triggered SET RotationSpeed: ${value}`);
-    this.currentRotationSpeed = value;
+    callback(null);
     const release = await this.mutex.acquire();
     try {
-      const state = await getCleanerState();
-      if (!state.isAuto()) {
-        if (value == 100) {
-          state.airvol = AIRVOL.TURBO;
-        } else if (value >= 50) {
-          state.airvol = AIRVOL.NORMAL;
-        } else if (value >= 30) {
-          state.airvol = AIRVOL.WEAK;
-        } else {
-          state.airvol = AIRVOL.SILENT;
-        }
-        await setCleanerState(state);
-      }
+      this.currentStatus.charCurrentRotationSpeed = value;
+      await setCleanerState(this.currentStatus);
     } finally {
       release();
     }
-    callback(null);
   }
 
   async handleRotationSpeedGet(callback) {
     this.log.debug('Triggered GET RotationSpeed');
-    const state = await getCleanerState();
-    switch (state.airvol) {
-      case AIRVOL.SILENT:
-        this.currentRotationSpeed = 15;
-        break;
-      case AIRVOL.WEAK:
-        this.currentRotationSpeed = 30;
-        break;
-      case AIRVOL.NORMAL:
-        this.currentRotationSpeed = 50;
-        break;
-      case AIRVOL.TURBO:
-        this.currentRotationSpeed = 100;
-        break;
-      default:
-        this.currentRotationSpeed = 50;
-        break;
-    }
-    callback(null, this.currentRotationSpeed);
+    callback(null, this.currentStatus.charCurrentRotationSpeed);
+    await this.update();
+    this.cleanerService.getCharacteristic(this.api.hap.Characteristic.RotationSpeed).updateValue(this.currentStatus.charCurrentRotationSpeed);
   }
 
   // モード
   async handleTargetAirPurifierStateGet(callback) {
     this.log.debug('Triggered GET TargetAirPurifierState');
-    const state = await getCleanerState();
-    if (state.isAuto()) {
-      this.targetState = this.api.hap.Characteristic.TargetAirPurifierState.AUTO;
-    } else {
-      this.targetState = this.api.hap.Characteristic.TargetAirPurifierState.MANUAL;
-    }
-    callback(null, this.targetState);
+    callback(null, this.currentStatus.charTargetAirPurifierState);
+    await this.update();
+    this.cleanerService.getCharacteristic(this.api.hap.Characteristic.TargetAirPurifierState).updateValue(this.currentStatus.charTargetAirPurifierState);
   }
 
   async handleTargetAirPurifierStateSet(value, callback) {
     this.log.debug('Triggered SET TargetAirPurifierState:' + value);
+    callback(null);
     const release = await this.mutex.acquire();
     try {
-      this.targetState = value;
-      const state = await getCleanerState();
       if (value === this.api.hap.Characteristic.TargetAirPurifierState.AUTO) {
-        state.mode = MODE.RCOMMENDED;
-        await setCleanerState(state);
+        this.currentStatus.mode = MODE.RCOMMENDED;
+        await setCleanerState(this.currentStatus);
       } else if (value === this.api.hap.Characteristic.TargetAirPurifierState.MANUAL) {
-        state.mode = MODE.MANUAL;
-        await setCleanerState(state);
-        if (state.humd !== HUMD.OFF) {
+        this.currentStatus.mode = MODE.MANUAL;
+        await setCleanerState(this.currentStatus);
+        if (this.currentStatus.humd !== HUMD.OFF) {
           this.humidifierService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.api.hap.Characteristic.Active.ACTIVE);
-          this.currentHumdState = this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING;
-          this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentHumdState);
+          this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentStatus.charCurrentHumdState);
         } else {
           this.humidifierService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.api.hap.Characteristic.Active.INACTIVE);
-          this.currentHumdState = this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE;
-          this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentHumdState);
+          this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentStatus.charCurrentHumdState);
         }
       }
-      callback(null);
     } finally {
       release();
     }
@@ -236,39 +182,30 @@ export class DaikinCleanerAccessory {
         加湿機能
      ============= */
   async handleHumdActiveGet(callback) {
-    const state = await getCleanerState();
-    let active = this.api.hap.Characteristic.Active.INACTIVE;
-    if (state.pow === POW.OFF || state.humd === HUMD.OFF) {
-      this.currentHumdState = this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE;
-      active = this.api.hap.Characteristic.Active.INACTIVE;
-    } else {
-      this.currentHumdState = this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING;
-      active = this.api.hap.Characteristic.Active.ACTIVE;
-    }
-    callback(null, active);
-    this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentHumdState);
+    callback(null, this.currentStatus.charCurrentHumdActive);
+    await this.update();
+    this.humidifierService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.currentStatus.charCurrentHumdActive);
+    this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentStatus.charCurrentHumdState);
   }
 
   async handleHumdActiveSet(value, callback) {
     callback();
     const release = await this.mutex.acquire();
     try {
-      const state = await getCleanerState();
+      await this.update();
       if (value === this.api.hap.Characteristic.Active.ACTIVE) {
-        // 空気清浄機本体の電源オン
-        state.pow = POW.ON;
-        this.cleanerService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.api.hap.Characteristic.Active.ACTIVE);
-        this.currentState = this.api.hap.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
-        this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentAirPurifierState).updateValue(this.currentState);
-        // ========================
-        state.humd = HUMD.HIGH;
-        this.currentHumdState = this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING;
+        this.currentStatus.pow = POW.ON;
+        this.cleanerService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.currentStatus.charActive);
+        this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentAirPurifierState).updateValue(this.currentStatus.charCurrentAirPurifierState);
+        this.currentStatus.humd = HUMD.HIGH;
+        this.humidifierService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.currentStatus.charCurrentHumdActive);
+        this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentStatus.charCurrentHumdState);
       } else {
-        state.humd = HUMD.OFF;
-        this.currentHumdState = this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE;
+        this.currentStatus.humd = HUMD.OFF;
+        this.humidifierService.getCharacteristic(this.api.hap.Characteristic.Active).updateValue(this.currentStatus.charCurrentHumdActive);
+        this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentStatus.charCurrentHumdState);
       }
-      await setCleanerState(state);
-      this.cleanerService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentHumdState);
+      await setCleanerState(this.currentStatus);
     } finally {
       release();
     }
@@ -276,13 +213,9 @@ export class DaikinCleanerAccessory {
 
   async handleHumidifierDehumidifierStateGet(callback) {
     this.log.debug('Triggered GET CurrentHumidifierDehumidifierState');
-    const state = await getCleanerState();
-    if (state.pow === POW.OFF || state.humd === HUMD.OFF) {
-      this.currentState = this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE;
-    } else {
-      this.currentState = this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING;
-    }
-    callback(null, this.currentState);
+    callback(null, this.currentStatus.charCurrentHumdState);
+    await this.update();
+    this.humidifierService.getCharacteristic(this.api.hap.Characteristic.CurrentHumidifierDehumidifierState).updateValue(this.currentStatus.charCurrentHumdState);
   }
 
   async handleTargetHumidifierDehumidifierStateGet(callback) {
@@ -306,37 +239,18 @@ export class DaikinCleanerAccessory {
   }
 
   async handleHumdRotationSpeedGet(callback) {
-    const state = await getCleanerState();
-    let rotationSpeed = 100;
-    switch (state.humd) {
-      case HUMD.HIGH:
-        rotationSpeed = 100;
-        break;
-      case HUMD.NORMAL:
-        rotationSpeed = 50;
-        break;
-      case HUMD.MODERATE:
-        rotationSpeed = 20;
-        break;
-      default:
-        break;
-    }
-    callback(null, rotationSpeed);
+    callback(null, this.currentStatus.charHumdRotationSpeed);
+    await this.update();
+    this.humidifierService.getCharacteristic(this.api.hap.Characteristic.RotationSpeed).updateValue(this.currentStatus.charHumdRotationSpeed);
   }
 
   async handleHumdRotationSpeedSet(value, callback) {
     callback(null);
     const release = await this.mutex.acquire();
     try {
-      const state = await getCleanerState();
-      if (value >= 70) {
-        state.humd = HUMD.HIGH;
-      } else if (value >= 30) {
-        state.humd = HUMD.NORMAL;
-      } else {
-        state.humd = HUMD.MODERATE;
-      }
-      await setCleanerState(state);
+      this.currentStatus.charHumdRotationSpeed = value;
+      await setCleanerState(this.currentStatus);
+      this.humidifierService.getCharacteristic(this.api.hap.Characteristic.RotationSpeed).updateValue(this.currentStatus.charHumdRotationSpeed);
     } finally {
       release();
     }

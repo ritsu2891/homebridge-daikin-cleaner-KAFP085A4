@@ -1,15 +1,19 @@
+import { API } from 'homebridge';
+
 export class DaikinCleanerStatus {
   private _pow = 0; // 電源
   private _mode = 0; // モード
   private _airvol = 0; // 風量
   private _humd = 0; // 加湿
+  private api;
 
-  constructor(res: string) {
+  constructor(res: string, api: API) {
     const parsedConfig = decodeStatusResponseStr(res);
     this._pow = parsedConfig['pow'];
     this._mode = parsedConfig['mode'];
     this._airvol = parsedConfig['airvol'];
     this._humd = parsedConfig['humd'];
+    this.api = api;
   }
 
   public getAsDict() {
@@ -64,6 +68,109 @@ export class DaikinCleanerStatus {
     this._humd = newHumd;
   }
 
+  public get charActive() {
+    return this.pow === POW.OFF ?
+      this.api.hap.Characteristic.Active.INACTIVE :
+      this.api.hap.Characteristic.Active.ACTIVE;
+  }
+
+  public get charCurrentAirPurifierState() {
+    return this.pow === POW.OFF ?
+      this.api.hap.Characteristic.CurrentAirPurifierState.INACTIVE :
+      this.api.hap.Characteristic.CurrentAirPurifierState.PURIFYING_AIR;
+  }
+
+  public get charTargetAirPurifierState() {
+    if (this.isAuto()) {
+      return this.api.hap.Characteristic.TargetAirPurifierState.AUTO;
+    } else {
+      return this.api.hap.Characteristic.TargetAirPurifierState.MANUAL;
+    }
+  }
+
+  public get charCurrentHumidifierActive() {
+    if (this.pow === POW.ON && this.humd !== HUMD.OFF) {
+      return this.api.hap.Characteristic.Active.ACTIVE;
+    } else {
+      return this.api.hap.Characteristic.Active.INACTIVE;
+    }
+  }
+
+  public get charCurrentHumidifierDehumidifierState() {
+    if (this.pow === POW.ON && this.humd !== HUMD.OFF) {
+      return this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING;
+    } else {
+      return this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE;
+    }
+  }
+
+  public set charCurrentRotationSpeed(value) {
+    if (!this.isAuto()) {
+      if (value == 100) {
+        this.airvol = AIRVOL.TURBO;
+      } else if (value >= 50) {
+        this.airvol = AIRVOL.NORMAL;
+      } else if (value >= 30) {
+        this.airvol = AIRVOL.WEAK;
+      } else {
+        this.airvol = AIRVOL.SILENT;
+      }
+    }
+  }
+
+  public get charCurrentRotationSpeed() {
+    switch (this.airvol) {
+      case AIRVOL.SILENT:
+        return 15;
+      case AIRVOL.WEAK:
+        return 30;
+      case AIRVOL.NORMAL:
+        return 50;
+      case AIRVOL.TURBO:
+        return 100;
+      default:
+        return 50;
+    }
+  }
+
+  public get charCurrentHumdActive() {
+    if (this.pow === POW.OFF || this.humd === HUMD.OFF) {
+      return this.api.hap.Characteristic.Active.INACTIVE;
+    } else {
+      return this.api.hap.Characteristic.Active.ACTIVE;
+    }
+  }
+
+  public get charCurrentHumdState() {
+    if (this.pow === POW.OFF || this.humd === HUMD.OFF) {
+      return this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.INACTIVE;
+    } else {
+      return this.api.hap.Characteristic.CurrentHumidifierDehumidifierState.HUMIDIFYING;
+    }
+  }
+
+  public set charHumdRotationSpeed(value) {
+    if (value >= 70) {
+      this.humd = HUMD.HIGH;
+    } else if (value >= 30) {
+      this.humd = HUMD.NORMAL;
+    } else {
+      this.humd = HUMD.MODERATE;
+    }
+  }
+
+  public get charHumdRotationSpeed() {
+    switch (this.humd) {
+      case HUMD.HIGH:
+        return 100;
+      case HUMD.NORMAL:
+        return 50;
+      case HUMD.MODERATE:
+        return 20;
+      default:
+        return 20;
+    }
+  }
 }
 
 export function decodeStatusResponseStr(res: string) {
