@@ -2,6 +2,8 @@ import axios from 'axios';
 import { API } from 'homebridge';
 import { DaikinCleanerStatus, decodeStatusResponseStr } from './DaikinCleanerStatus';
 
+import { debounce } from 'throttle-debounce';
+
 let ip = 'localhost';
 let client = axios.create({
   baseURL: `http://${ip}/`,
@@ -24,6 +26,7 @@ async function getCleanerState(api: API) {
 }
 
 async function setCleanerState(state: DaikinCleanerStatus) {
+  console.log(state.getAsDict());
   await client.get('/cleaner/set_control_info', {
     params: state.getAsDict(),
   });
